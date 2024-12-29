@@ -1,3 +1,4 @@
+--- @enum RDBG_COMMANDS
 RDBG_COMMANDS = {
 	-- Bring the RemedyBG window to the foreground and activate it. No additional
 	-- arguments follow the command. Returns RESULT_OK or

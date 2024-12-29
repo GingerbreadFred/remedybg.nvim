@@ -5,7 +5,7 @@ local remedybg = {
 require("remedybg.commands")
 require("remedybg.events")
 
-local enum = require("plenary.enum")
+local commands = require("remedybg.session.commands")
 
 local RDBG_PREFIX = "\\\\.\\pipe\\test"
 local RDBG_EVENTS = "\\\\.\\pipe\\test-events"
@@ -156,11 +156,12 @@ local event_parsers = {
 }
 
 --- @enum state
-local state = enum({
-	"CONNECTING",
-	"CONNECTED",
-	"ERROR",
-})
+local state = {
+	CONNECTING = 0,
+	SETUP = 1,
+	CONNECTED = 2,
+	ERROR = 3,
+}
 
 --- @class session
 local session = {
@@ -174,10 +175,13 @@ local session = {
 	process = nil,
 	--- @type state
 	state = state.CONNECTING,
+	--- @type breakpoints
+	breakpoints = nil,
 }
-local commands = require("remedybg.session.commands")
 
-function session:new(executable_command)
+--- @param executable_command string
+--- @param breakpoints breakpoints
+function session:new(executable_command, breakpoints)
 	local o = {}
 	setmetatable(o, self)
 	self.__index = self
@@ -188,6 +192,8 @@ function session:new(executable_command)
 	o.timer:start(1000, 1000, function()
 		o:loop()
 	end)
+
+	self.breakpoints = breakpoints
 
 	return o
 end
@@ -213,6 +219,8 @@ function session:try_connect()
 	return self.current_session:is_active() and self.event_pipe:is_active()
 end
 
+---@param cmd RDBG_COMMANDS
+---@param args table
 function session:write_command(cmd, args)
 	if not self.current_session then
 		return
@@ -254,8 +262,13 @@ function session:loop()
 
 	if self.state == state.CONNECTING then
 		if self:try_connect() then
-			self.state = state.CONNECTED
+			self.state = state.SETUP
 		end
+	elseif self.state == state.SETUP then
+		for _, v in pairs(self.breakpoints:get_breakpoints()) do
+			self:write_command(RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE, { filename = v.file, line_num = v.line })
+		end
+		self.state = state.CONNECTED
 	elseif self.state == state.CONNECTED then
 		assert(self.event_pipe, "Event pipe shouldn't be nil")
 
@@ -281,6 +294,7 @@ function session:loop()
 	end
 end
 
+--- @param break_at_entry_point boolean
 function session:start_debugging(break_at_entry_point)
 	self:write_command(RDBG_COMMANDS.START_DEBUGGING, { break_at_entry_point = break_at_entry_point })
 end
@@ -291,6 +305,10 @@ end
 
 function session:step_over()
 	self:write_command(RDBG_COMMANDS.STEP_OVER_BY_LINE, {})
+end
+
+function session:step_out()
+	self:write_command(RDBG_COMMANDS.STEP_OUT, {})
 end
 
 return session

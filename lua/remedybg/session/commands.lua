@@ -262,8 +262,7 @@ return {
 	-- [result :: rdbg_CommandResult (uint16_t)]
 	[RDBG_COMMANDS.START_DEBUGGING] = {
 		pack = function(args)
-			print(vim.inspect(args))
-			return struct.pack("HB", RDBG_COMMANDS.START_DEBUGGING, args.break_at_entry_point and 1 or 0)
+			return struct.pack("HB", RDBG_COMMANDS.START_DEBUGGING, args.break_at_entry_point and 1 or 1)
 		end,
 		read = function(_) end,
 	},
@@ -372,8 +371,12 @@ return {
 	-- [cmd :: rdbg_Command (uint16_t)]
 	-- ->
 	-- [result :: rdbg_CommandResult (uint16_t)]
-	[RDBG_COMMANDS.STEP_OUT] = nil,
-
+	[RDBG_COMMANDS.STEP_OUT] = {
+		pack = function(_)
+			return struct.pack("H", RDBG_COMMANDS.STEP_OUT)
+		end,
+		read = function(_) end,
+	},
 	-- With the target suspended, continue execution. Can return
 	-- RESULT_OK or RDBG_COMMAND_RESULT_INVALID_TARGET_STATE.
 	--
@@ -491,10 +494,24 @@ return {
 	-- [line_num :: uint32_t]
 	-- [condition_expr :: rdbg_String]
 	-- ->
-
+	-- [result :: rdbg_CommandResult (uint16_t)]
 	-- [bp_id :: rdbg_Id]
-	[RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE] = nil,
-
+	[RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE] = {
+		pack = function(args)
+			return struct.pack(
+				"HHc0IH",
+				RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE,
+				string.len(args.filename),
+				args.filename,
+				args.line_num,
+				0
+			)
+		end,
+		read = function(res)
+			local output = struct.unpack("I", res)
+			return { id = output[1] }
+		end,
+	},
 	-- Request a breakpoint at the given address.
 	--
 	-- [cmd :: rdbg_Command (uint16_t)]
