@@ -44,4 +44,8 @@ function M.toggle_breakpoint()
 	)
 end
 
+function M.populate_signs(buffer)
+	breakpoints:populate_signs(buffer)
+end
+
 return M

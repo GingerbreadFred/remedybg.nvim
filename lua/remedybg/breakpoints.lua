@@ -27,13 +27,17 @@ function breakpoint:new(file, line, remedybg_id)
 	local all_buffers = vim.api.nvim_list_bufs()
 
 	for _, v in pairs(all_buffers) do
-		-- TODO: create the sign when the buffer opens if it wasn't open when the breakpoint was created
 		if vim.api.nvim_buf_get_name(v) == file then
-			o.sign_id = vim.fn.sign_place(0, "breakpoint", "breakpoint", v, { lnum = line })
+			o:create_sign(v)
 		end
 	end
 
 	return o
+end
+
+function breakpoint:create_sign(buffer)
+	self:remove()
+	self.sign_id = vim.fn.sign_place(0, "breakpoint", "breakpoint", buffer, { lnum = self.line })
 end
 
 function breakpoint:remove()
@@ -137,6 +141,15 @@ end
 function breakpoints:on_debugger_terminated()
 	for _, v in pairs(self.active_breakpoints) do
 		v:set_remedybg_id(nil)
+	end
+end
+
+function breakpoints:populate_signs(buffer)
+	local filename = vim.api.nvim_buf_get_name(buffer)
+	for _, v in pairs(self.active_breakpoints) do
+		if v.file == filename then
+			v:create_sign(buffer)
+		end
 	end
 end
 
