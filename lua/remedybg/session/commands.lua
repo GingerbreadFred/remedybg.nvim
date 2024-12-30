@@ -1,4 +1,8 @@
 require("remedybg.commands")
+require("remedybg.breakpoint_kind")
+local remedybg = {
+	io = require("remedybg.io"),
+}
 local struct = require("struct")
 
 return {
@@ -605,8 +609,62 @@ return {
 	--     [num_bytes :: uint8_t]
 	--     [access_kind :: rdbg_ProcessorBreakpointAccessKind (uint8_t)]
 	-- }
-	[RDBG_COMMANDS.GET_BREAKPOINT] = nil,
+	[RDBG_COMMANDS.GET_BREAKPOINT] = {
+		pack = function(args)
+			return struct.pack("HI", RDBG_COMMANDS.GET_BREAKPOINT, args.bp_id)
+		end,
+		read = function(data)
+			local uid
+			uid, data = remedybg.io.pop_uint32(data)
+			local enabled
+			enabled, data = remedybg.io.pop_bool(data)
+			local module_name
+			module_name, data = remedybg.io.pop_string(data)
+			local condition_expr
+			condition_expr, data = remedybg.io.pop_string(data)
+			local kind
+			kind, data = remedybg.io.pop_byte(data)
+			local info = {}
+			if kind == RDBG_BREAKPOINT_KIND.RDBG_BREAKPOINT_KIND_FUNCTION_NAME then
+				local function_name
+				function_name, data = remedybg.io.pop_string(data)
+				local overload_id
+				overload_id, data = remedybg.io.pop_uint32(data)
+				info.function_name = function_name
+				info.overload_id = overload_id
+			elseif kind == RDBG_BREAKPOINT_KIND.RDBG_BREAKPOINT_KIND_FILENAME_LINE then
+				local filename
+				filename, data = remedybg.io.pop_string(data)
+				local line_num
+				line_num, data = remedybg.io.pop_uint32(data)
+				info.filename = filename
+				info.line_num = line_num
+			elseif kind == RDBG_BREAKPOINT_KIND.RDBG_BREAKPOINT_KIND_ADDRESS then
+				local address
+				address, data = remedybg.io.pop_uint32(data)
+				info.address = address
+			elseif kind == RDBG_BREAKPOINT_KIND.RDBG_BREAKPOINT_KIND_PROCESSOR then
+				local addr_expression
+				addr_expression, data = remedybg.io.pop_string(data)
+				local num_bytes
+				num_bytes, data = remedybg.io.pop_byte(data)
+				local access_kind
+				access_kind, data = remedybg.io.pop_byte(data)
+				info.addr_expression = addr_expression
+				info.num_bytes = num_bytes
+				info.access_kind = access_kind
+			end
 
+			return {
+				uid = uid,
+				enabled = enabled,
+				module_name = module_name,
+				condition_expr = condition_expr,
+				kind = kind,
+				info = info,
+			}
+		end,
+	},
 	--
 	-- Watch Window Expressions
 

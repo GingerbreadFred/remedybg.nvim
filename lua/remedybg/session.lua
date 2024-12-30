@@ -7,6 +7,7 @@ require("remedybg.events")
 
 local commands = require("remedybg.session.commands")
 
+-- TODO: create unique names
 local RDBG_PREFIX = "\\\\.\\pipe\\test"
 local RDBG_EVENTS = "\\\\.\\pipe\\test-events"
 
@@ -193,7 +194,15 @@ function session:new(executable_command, breakpoints)
 		o:loop()
 	end)
 
-	self.breakpoints = breakpoints
+	o.breakpoints = breakpoints
+
+	-- TODO: handle session destruction and unregister callback
+	o.breakpoints:on_breakpoint_added(function(breakpoint)
+		o:write_command(
+			RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE,
+			{ filename = breakpoint.file, line_num = breakpoint.line }
+		)
+	end)
 
 	return o
 end
@@ -221,7 +230,7 @@ end
 
 ---@param cmd RDBG_COMMANDS
 ---@param args table
-function session:write_command(cmd, args)
+function session:write_command(cmd, args, callback)
 	if not self.current_session then
 		return
 	end
@@ -231,18 +240,18 @@ function session:write_command(cmd, args)
 	end
 
 	self.current_session:write(command.pack(args))
-	local output
 	self.current_session:read_start(function(_, data)
 		if data then
 			local res
 			res, data = remedybg.io.pop_uint16(data)
 			if res == 1 then
-				output = command.read(data)
+				local output = command.read(data)
+				if callback then
+					callback(output)
+				end
 			end
 		end
 	end)
-
-	return output
 end
 
 function session:loop()
@@ -265,6 +274,7 @@ function session:loop()
 			self.state = state.SETUP
 		end
 	elseif self.state == state.SETUP then
+		-- add all the breakpoints we created offline
 		for _, v in pairs(self.breakpoints:get_breakpoints()) do
 			self:write_command(RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE, { filename = v.file, line_num = v.line })
 		end
@@ -274,19 +284,32 @@ function session:loop()
 
 		self.event_pipe:read_start(function(_, data)
 			while data and data:len() > 0 do
-				-- todo: handle split buffers
-				-- todo: log
+				-- TODO: handle split buffers
+				-- TODO: log
 				local cmd
 				cmd, data = remedybg.io.pop_uint16(data)
 				local res
 				res, data = event_parsers[cmd].parse(data)
-				-- todo: log
-
-				-- todo: proper callbacks
+				-- TODO: proper callbacks
 				if cmd == RDBG_DEBUG_EVENTS.SOURCE_LOCATION_CHANGED then
 					vim.schedule(function()
-						-- todo: open buffer if it doesn't exist and navigate within the buffer
+						-- TODO: open buffer if it doesn't exist and navigate within the buffer
 						vim.cmd("e +" .. res.line_num .. " " .. res.filename)
+					end)
+				end
+				if cmd == RDBG_DEBUG_EVENTS.BREAKPOINT_ADDED then
+					local bp_id = res.bp_id
+					-- TODO: event queue
+					vim.schedule(function()
+						self:get_breakpoint(bp_id, function(bp_info)
+							vim.schedule(function()
+								self.breakpoints:on_breakpoint_added_remotely(
+									bp_info.info.filename,
+									bp_info.info.line_num,
+									bp_id
+								)
+							end)
+						end)
 					end)
 				end
 			end
@@ -309,6 +332,10 @@ end
 
 function session:step_out()
 	self:write_command(RDBG_COMMANDS.STEP_OUT, {})
+end
+
+function session:get_breakpoint(bp_id, callback)
+	self:write_command(RDBG_COMMANDS.GET_BREAKPOINT, { bp_id = bp_id }, callback)
 end
 
 return session
