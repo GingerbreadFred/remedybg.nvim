@@ -27,4 +27,15 @@ local function pop_uint32(data)
 end
 M.pop_uint32 = pop_uint32
 
+local function pop_bool(data)
+	local val, pos = struct.unpack("B", data, 1)
+	return val[1] and true, string.sub(data, pos, string.len(data))
+end
+M.pop_bool = pop_bool
+
+local function pop_byte(data)
+	local val, pos = struct.unpack("B", data, 1)
+	return val[1], string.sub(data, pos, string.len(data))
+end
+M.pop_byte = pop_byte
 return M
