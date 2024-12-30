@@ -22,7 +22,6 @@ function breakpoint:new(file, line, remedybg_id)
 	o.file = file
 	o.line = line
 	o.active = true
-	-- TODO: clear the remedy id if the debugger disconnects
 	o.remedybg_id = remedybg_id
 
 	local all_buffers = vim.api.nvim_list_bufs()
@@ -75,6 +74,9 @@ function breakpoints:toggle_breakpoint(file, line)
 	for k, v in pairs(self.active_breakpoints) do
 		if v.file == file and v.line == line then
 			v:remove()
+			for _, callbacks in pairs(self.breakpoint_removed) do
+				callbacks(v)
+			end
 			table.remove(self.active_breakpoints, k)
 			return
 		end
@@ -82,8 +84,8 @@ function breakpoints:toggle_breakpoint(file, line)
 
 	local new_breakpoint = breakpoint:new(file, line)
 	table.insert(self.active_breakpoints, new_breakpoint)
-	for _, v in pairs(self.breakpoint_added) do
-		v(new_breakpoint)
+	for _, callbacks in pairs(self.breakpoint_added) do
+		callbacks(new_breakpoint)
 	end
 end
 
@@ -117,6 +119,19 @@ function breakpoints:on_breakpoint_added_remotely(filename, line_num, bp_id)
 
 	-- if we didn't already know about this breakpoint it must be new so create
 	table.insert(self.active_breakpoints, breakpoint:new(filename, line_num, bp_id))
+end
+
+---Triggered when a breakpoint is removed by remedybg
+---@param bp_id integer
+function breakpoints:on_breakpoint_removed_remotely(bp_id)
+	-- First search for breakpoints we already know about and update if found
+	for k, v in pairs(self.active_breakpoints) do
+		if v.remedybg_id == bp_id then
+			v:remove()
+			table.remove(self.active_breakpoints, k)
+			return
+		end
+	end
 end
 
 function breakpoints:on_debugger_terminated()

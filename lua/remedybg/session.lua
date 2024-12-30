@@ -60,6 +60,10 @@ function session:new(executable_command, breakpoints)
 		)
 	end)
 
+	o.breakpoints:on_breakpoint_removed(function(breakpoint)
+		o:write_command(RDBG_COMMANDS.DELETE_BREAKPOINT, { bp_id = breakpoint.remedybg_id })
+	end)
+
 	return o
 end
 
@@ -152,15 +156,14 @@ function session:loop()
 				local res
 				res, data = events[cmd].parse(data)
 				-- TODO: proper callbacks
+				-- TODO: event queue
 				if cmd == RDBG_DEBUG_EVENTS.SOURCE_LOCATION_CHANGED then
 					vim.schedule(function()
 						-- TODO: open buffer if it doesn't exist and navigate within the buffer
 						vim.cmd("e +" .. res.line_num .. " " .. res.filename)
 					end)
-				end
-				if cmd == RDBG_DEBUG_EVENTS.BREAKPOINT_ADDED then
+				elseif cmd == RDBG_DEBUG_EVENTS.BREAKPOINT_ADDED then
 					local bp_id = res.bp_id
-					-- TODO: event queue
 					vim.schedule(function()
 						self:get_breakpoint(bp_id, function(bp_info)
 							vim.schedule(function()
@@ -171,6 +174,11 @@ function session:loop()
 								)
 							end)
 						end)
+					end)
+				elseif cmd == RDBG_DEBUG_EVENTS.BREAKPOINT_REMOVED then
+					local bp_id = res.bp_id
+					vim.schedule(function()
+						self.breakpoints:on_breakpoint_removed_remotely(bp_id)
 					end)
 				end
 			end

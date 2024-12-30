@@ -573,8 +573,12 @@ return {
 	-- [bp_id :: rdbg_Id]
 	-- ->
 	-- [result :: rdbg_CommandResult (uint16_t)]
-	[RDBG_COMMANDS.DELETE_BREAKPOINT] = nil,
-
+	[RDBG_COMMANDS.DELETE_BREAKPOINT] = {
+		pack = function(args)
+			return struct.pack("HI", RDBG_COMMANDS.DELETE_BREAKPOINT, args.bp_id)
+		end,
+		read = function(_) end,
+	},
 	-- Delete all existing breakpoints.
 	--
 	-- [cmd :: rdbg_Command (uint16_t)]
