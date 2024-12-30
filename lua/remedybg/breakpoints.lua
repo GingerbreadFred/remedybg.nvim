@@ -8,8 +8,7 @@ local breakpoint = {
 	file = nil,
 	--- @type integer?
 	sign_id = nil,
-
-	-- TODO: SETUP
+	--- @type integer?
 	remedybg_id = nil,
 }
 
@@ -23,11 +22,13 @@ function breakpoint:new(file, line, remedybg_id)
 	o.file = file
 	o.line = line
 	o.active = true
+	-- TODO: clear the remedy id if the debugger disconnects
 	o.remedybg_id = remedybg_id
 
 	local all_buffers = vim.api.nvim_list_bufs()
 
 	for _, v in pairs(all_buffers) do
+		-- TODO: create the sign when the buffer opens if it wasn't open when the breakpoint was created
 		if vim.api.nvim_buf_get_name(v) == file then
 			o.sign_id = vim.fn.sign_place(0, "breakpoint", "breakpoint", v, { lnum = line })
 		end
@@ -50,10 +51,8 @@ end
 local breakpoints = {
 	--- @type breakpoint[]
 	active_breakpoints = {},
-
 	--- @type fun(breakpoint : breakpoint)[]
 	breakpoint_added = {},
-
 	--- @type fun(breakpoint : breakpoint)[]
 	breakpoint_removed = {},
 }
@@ -118,6 +117,12 @@ function breakpoints:on_breakpoint_added_remotely(filename, line_num, bp_id)
 
 	-- if we didn't already know about this breakpoint it must be new so create
 	table.insert(self.active_breakpoints, breakpoint:new(filename, line_num, bp_id))
+end
+
+function breakpoints:on_debugger_terminated()
+	for _, v in pairs(self.active_breakpoints) do
+		v:set_remedybg_id(nil)
+	end
 end
 
 return breakpoints
