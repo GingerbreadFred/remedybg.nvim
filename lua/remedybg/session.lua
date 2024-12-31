@@ -91,6 +91,7 @@ end
 ---@param cmd RDBG_COMMANDS
 ---@param args table
 function session:write_command(cmd, args, callback)
+	print(cmd)
 	if not self.current_session then
 		return
 	end
@@ -101,13 +102,16 @@ function session:write_command(cmd, args, callback)
 
 	self.current_session:write(command.pack(args))
 	self.current_session:read_start(function(_, data)
+		print("READING")
 		if data then
 			local res
 			res, data = remedybg.io.pop_uint16(data)
 			if res == 1 then
 				local output = command.read(data)
 				if callback then
-					callback(output)
+					vim.schedule(function()
+						callback(output)
+					end)
 				end
 			end
 		end
@@ -159,7 +163,17 @@ function session:loop()
 				-- TODO: event queue
 				if cmd == RDBG_DEBUG_EVENTS.SOURCE_LOCATION_CHANGED then
 					vim.schedule(function()
-						-- TODO: open buffer if it doesn't exist and navigate within the buffer
+						local all_buffers = vim.api.nvim_list_bufs()
+						local current_win = vim.api.nvim_get_current_win()
+
+						for _, v in pairs(all_buffers) do
+							if vim.api.nvim_buf_get_name(v) == res.filename then
+								vim.api.nvim_win_set_buf(current_win, v)
+								vim.api.nvim_win_set_cursor(current_win, { res.line_num, 0 })
+								return
+							end
+						end
+
 						vim.cmd("e +" .. res.line_num .. " " .. res.filename)
 					end)
 				elseif cmd == RDBG_DEBUG_EVENTS.BREAKPOINT_ADDED then
