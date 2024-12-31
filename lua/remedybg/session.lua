@@ -20,6 +20,49 @@ local state = {
 	ERROR = 3,
 }
 
+--- @class event_queue
+local event_queue = {
+	--- @type function[]
+	events = {},
+	--- @type boolean
+	busy = false,
+}
+
+function event_queue:new()
+	local o = {}
+	setmetatable(o, self)
+	self.__index = self
+
+	return o
+end
+
+function event_queue:run()
+	if not self.busy then
+		local num = table.getn(events)
+		if num == 0 then
+			return
+		end
+		local first = events[1]
+		self.busy = true
+		table.remove(events, 1)
+
+		first()
+	end
+end
+
+function event_queue:release()
+	self.busy = false
+end
+
+function event_queue:enqueue(func)
+	if not self.busy then
+		self.busy = true
+		func()
+	else
+		table.insert(events, func)
+	end
+end
+
 --- @class session
 local session = {
 	--- @type uv_pipe_t?
@@ -34,6 +77,8 @@ local session = {
 	state = state.CONNECTING,
 	--- @type breakpoints
 	breakpoints = nil,
+	--- @type event_queue
+	event_queue = nil,
 }
 
 --- @param executable_command string
@@ -64,6 +109,8 @@ function session:new(executable_command, breakpoints)
 		o:write_command(RDBG_COMMANDS.DELETE_BREAKPOINT, { bp_id = breakpoint.remedybg_id })
 	end)
 
+	o.event_queue = event_queue:new()
+
 	return o
 end
 
@@ -91,30 +138,31 @@ end
 ---@param cmd RDBG_COMMANDS
 ---@param args table
 function session:write_command(cmd, args, callback)
-	print(cmd)
-	if not self.current_session then
-		return
-	end
 	local command = commands[cmd]
+
 	if not command then
 		return
 	end
 
-	self.current_session:write(command.pack(args))
-	self.current_session:read_start(function(_, data)
-		print("READING")
-		if data then
-			local res
-			res, data = remedybg.io.pop_uint16(data)
-			if res == 1 then
-				local output = command.read(data)
-				if callback then
-					vim.schedule(function()
+	if not self.current_session then
+		return
+	end
+
+	self.event_queue:enqueue(function()
+		self.current_session:write(command.pack(args))
+		self.current_session:read_start(function(_, data)
+			if data then
+				local res
+				res, data = remedybg.io.pop_uint16(data)
+				if res == 1 then
+					local output = command.read(data)
+					if callback then
 						callback(output)
-					end)
+					end
 				end
 			end
-		end
+			self.event_queue:release()
+		end)
 	end)
 end
 
@@ -151,6 +199,7 @@ function session:loop()
 	elseif self.state == state.CONNECTED then
 		assert(self.event_pipe, "Event pipe shouldn't be nil")
 
+		self.event_queue:run()
 		self.event_pipe:read_start(function(_, data)
 			while data and data:len() > 0 do
 				-- TODO: handle split buffers
@@ -160,7 +209,6 @@ function session:loop()
 				local res
 				res, data = events[cmd].parse(data)
 				-- TODO: proper callbacks
-				-- TODO: event queue
 				if cmd == RDBG_DEBUG_EVENTS.SOURCE_LOCATION_CHANGED then
 					vim.schedule(function()
 						local all_buffers = vim.api.nvim_list_bufs()
@@ -174,6 +222,7 @@ function session:loop()
 							end
 						end
 
+						-- buffer is not open, so let's open it
 						vim.cmd("e +" .. res.line_num .. " " .. res.filename)
 					end)
 				elseif cmd == RDBG_DEBUG_EVENTS.BREAKPOINT_ADDED then
