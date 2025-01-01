@@ -11,7 +11,8 @@ local active_session = nil
 local breakpoints = remedybg.breakpoints:new()
 
 function M.setup()
-	breakpoints.setup()
+	remedybg.breakpoints.setup()
+	remedybg.session.setup()
 end
 
 --- @param executable_command string
@@ -45,7 +46,10 @@ function M.toggle_breakpoint()
 end
 
 function M.populate_signs(buffer)
-	breakpoints:populate_signs(buffer)
+	breakpoints:on_buffer_loaded(buffer)
+	if active_session then
+		active_session:on_buffer_loaded(buffer)
+	end
 end
 
 return M
