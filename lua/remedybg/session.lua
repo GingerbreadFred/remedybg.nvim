@@ -1,6 +1,7 @@
 local uv = vim.uv
 local remedybg = {
 	io = require("remedybg.io"),
+	util = require("remedybg.util"),
 }
 require("remedybg.commands")
 require("remedybg.events")
@@ -19,6 +20,79 @@ local state = {
 	CONNECTED = 2,
 	ERROR = 3,
 }
+
+--- @class stack_frame_indicator
+local stack_frame_indicator = {
+	sign_id = nil,
+	filename = "",
+	line_num = 0,
+	--- @type breakpoints
+	breakpoints = nil,
+}
+
+function stack_frame_indicator:new(breakpoints)
+	local o = {}
+	setmetatable(o, self)
+	self.__index = self
+
+	o.breakpoints = breakpoints
+	o.breakpoints:on_breakpoint_added(function(breakpoint)
+		if o.filename == breakpoint.file and o.line_num == breakpoint.line then
+			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
+			o:place(buffer, true)
+		end
+	end)
+	o.breakpoints:on_breakpoint_removed(function(breakpoint)
+		if o.filename == breakpoint.file then
+			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
+			o:place(buffer, false)
+		end
+	end)
+
+	return o
+end
+
+function stack_frame_indicator:place(buffer, is_breakpoint)
+	self:remove()
+	if buffer then
+		local sign_name = is_breakpoint and "stack_frame_indicator_with_breakpoint" or "stack_frame_indicator"
+		local sign_id = self.sign_id or 0
+		self.sign_id = vim.fn.sign_place(sign_id, "stack_frame_indicator", sign_name, buffer, { lnum = self.line_num })
+	end
+end
+
+function stack_frame_indicator:update_file_line(filename, line_num)
+	self.filename = filename
+	self.line_num = line_num
+
+	local buffer = remedybg.util.get_buffer_for_filename(filename)
+
+	if buffer then
+		local is_breakpoint = false
+		for _, v in pairs(self.breakpoints:get_breakpoints()) do
+			if v.file == filename and v.line == line_num then
+				is_breakpoint = true
+				break
+			end
+		end
+		self:place(buffer, is_breakpoint)
+	end
+end
+
+function stack_frame_indicator:remove()
+	if self.sign_id then
+		vim.fn.sign_unplace("stack_frame_indicator", { id = self.sign_id })
+		self.sign_id = nil
+	end
+end
+
+function stack_frame_indicator:on_buffer_loaded(buffer)
+	local filename = vim.api.nvim_buf_get_name(buffer)
+
+	if filename == self.filename then
+		self:place(buffer)
+	end
+end
 
 --- @class event_queue
 local event_queue = {
@@ -79,7 +153,14 @@ local session = {
 	breakpoints = nil,
 	--- @type event_queue
 	event_queue = nil,
+	--- @type stack_frame_indicator
+	stack_frame_indicator = nil,
 }
+
+function session.setup()
+	vim.fn.sign_define("stack_frame_indicator", { text = ">", texthl = "", linehl = "", numhl = "" })
+	vim.fn.sign_define("stack_frame_indicator_with_breakpoint", { text = "B>", texthl = "", linehl = "", numhl = "" })
+end
 
 --- @param executable_command string
 --- @param breakpoints breakpoints
@@ -98,18 +179,25 @@ function session:new(executable_command, breakpoints)
 	o.breakpoints = breakpoints
 
 	-- TODO: handle session destruction and unregister callback
-	o.breakpoints:on_breakpoint_added(function(breakpoint)
-		o:write_command(
-			RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE,
-			{ filename = breakpoint.file, line_num = breakpoint.line }
-		)
+	o.breakpoints:on_breakpoint_added(function(breakpoint, added_remotely)
+		--- if the breakpoint was added locally then notify remedy_bg
+		if not added_remotely then
+			o:write_command(
+				RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE,
+				{ filename = breakpoint.file, line_num = breakpoint.line }
+			)
+		end
 	end)
 
-	o.breakpoints:on_breakpoint_removed(function(breakpoint)
-		o:write_command(RDBG_COMMANDS.DELETE_BREAKPOINT, { bp_id = breakpoint.remedybg_id })
+	o.breakpoints:on_breakpoint_removed(function(breakpoint, removed_remotely)
+		if not removed_remotely then
+			o:write_command(RDBG_COMMANDS.DELETE_BREAKPOINT, { bp_id = breakpoint.remedybg_id })
+		end
 	end)
 
 	o.event_queue = event_queue:new()
+
+	o.stack_frame_indicator = stack_frame_indicator:new(breakpoints)
 
 	return o
 end
@@ -178,6 +266,7 @@ function session:cleanup()
 	end
 
 	self.breakpoints:on_debugger_terminated()
+	self.stack_frame_indicator:remove()
 end
 
 function session:loop()
@@ -211,15 +300,15 @@ function session:loop()
 				-- TODO: proper callbacks
 				if cmd == RDBG_DEBUG_EVENTS.SOURCE_LOCATION_CHANGED then
 					vim.schedule(function()
-						local all_buffers = vim.api.nvim_list_bufs()
 						local current_win = vim.api.nvim_get_current_win()
+						local buffer = remedybg.util.get_buffer_for_filename(res.filename)
 
-						for _, v in pairs(all_buffers) do
-							if vim.api.nvim_buf_get_name(v) == res.filename then
-								vim.api.nvim_win_set_buf(current_win, v)
-								vim.api.nvim_win_set_cursor(current_win, { res.line_num, 0 })
-								return
-							end
+						self.stack_frame_indicator:update_file_line(res.filename, res.line_num)
+
+						if buffer then
+							vim.api.nvim_win_set_buf(current_win, buffer)
+							vim.api.nvim_win_set_cursor(current_win, { res.line_num, 0 })
+							return
 						end
 
 						-- buffer is not open, so let's open it
@@ -268,6 +357,10 @@ end
 
 function session:get_breakpoint(bp_id, callback)
 	self:write_command(RDBG_COMMANDS.GET_BREAKPOINT, { bp_id = bp_id }, callback)
+end
+
+function session:on_buffer_loaded(buffer)
+	self.stack_frame_indicator:on_buffer_loaded(buffer)
 end
 
 return session

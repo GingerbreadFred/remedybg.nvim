@@ -54,9 +54,9 @@ end
 local breakpoints = {
 	--- @type breakpoint[]
 	active_breakpoints = {},
-	--- @type fun(breakpoint : breakpoint)[]
+	--- @type fun(breakpoint : breakpoint, added_remotely : boolean)[]
 	breakpoint_added = {},
-	--- @type fun(breakpoint : breakpoint)[]
+	--- @type fun(breakpoint : breakpoint, removed_remotely : boolean)[]
 	breakpoint_removed = {},
 }
 
@@ -79,7 +79,7 @@ function breakpoints:toggle_breakpoint(file, line)
 		if v.file == file and v.line == line then
 			v:remove()
 			for _, callbacks in pairs(self.breakpoint_removed) do
-				callbacks(v)
+				callbacks(v, false)
 			end
 			table.remove(self.active_breakpoints, k)
 			return
@@ -89,16 +89,16 @@ function breakpoints:toggle_breakpoint(file, line)
 	local new_breakpoint = breakpoint:new(file, line)
 	table.insert(self.active_breakpoints, new_breakpoint)
 	for _, callbacks in pairs(self.breakpoint_added) do
-		callbacks(new_breakpoint)
+		callbacks(new_breakpoint, false)
 	end
 end
 
---- @param callback fun(breakpoint : breakpoint)
+--- @param callback fun(breakpoint : breakpoint, added_remotely : boolean)
 function breakpoints:on_breakpoint_added(callback)
 	table.insert(self.breakpoint_added, callback)
 end
 
---- @param callback fun(breakpoint : breakpoint)
+--- @param callback fun(breakpoint : breakpoint, removed_remotely : boolean)
 function breakpoints:on_breakpoint_removed(callback)
 	table.insert(self.breakpoint_removed, callback)
 end
@@ -122,7 +122,11 @@ function breakpoints:on_breakpoint_added_remotely(filename, line_num, bp_id)
 	end
 
 	-- if we didn't already know about this breakpoint it must be new so create
-	table.insert(self.active_breakpoints, breakpoint:new(filename, line_num, bp_id))
+	local new_breakpoint = breakpoint:new(filename, line_num, bp_id)
+	table.insert(self.active_breakpoints, new_breakpoint)
+	for _, callbacks in pairs(self.breakpoint_added) do
+		callbacks(new_breakpoint, true)
+	end
 end
 
 ---Triggered when a breakpoint is removed by remedybg
@@ -133,6 +137,9 @@ function breakpoints:on_breakpoint_removed_remotely(bp_id)
 		if v.remedybg_id == bp_id then
 			v:remove()
 			table.remove(self.active_breakpoints, k)
+			for _, callbacks in pairs(self.breakpoint_removed) do
+				callbacks(v, true)
+			end
 			return
 		end
 	end
@@ -144,7 +151,7 @@ function breakpoints:on_debugger_terminated()
 	end
 end
 
-function breakpoints:populate_signs(buffer)
+function breakpoints:on_buffer_loaded(buffer)
 	local filename = vim.api.nvim_buf_get_name(buffer)
 	for _, v in pairs(self.active_breakpoints) do
 		if v.file == filename then
