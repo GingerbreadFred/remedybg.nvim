@@ -387,8 +387,12 @@ return {
 	-- [cmd :: rdbg_Command (uint16_t)]
 	-- ->
 	-- [result :: rdbg_CommandResult (uint16_t)]
-	[RDBG_COMMANDS.CONTINUE_EXECUTION] = nil,
-
+	[RDBG_COMMANDS.CONTINUE_EXECUTION] = {
+		pack = function(_)
+			return struct.pack("H", RDBG_COMMANDS.CONTINUE_EXECUTION)
+		end,
+		read = function(_) end,
+	},
 	-- When the target is not being debugged or is suspended, run to the given
 	-- filename and line number.
 	--

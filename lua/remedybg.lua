@@ -45,6 +45,10 @@ function M.toggle_breakpoint()
 	)
 end
 
+function M.continue_execution()
+	active_session:continue_execution()
+end
+
 function M.populate_signs(buffer)
 	breakpoints:on_buffer_loaded(buffer)
 	if active_session then

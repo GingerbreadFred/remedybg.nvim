@@ -332,6 +332,10 @@ function session:loop()
 					vim.schedule(function()
 						self.breakpoints:on_breakpoint_removed_remotely(bp_id)
 					end)
+				elseif cmd == RDBG_DEBUG_EVENTS.EXIT_PROCESS or cmd == RDBG_DEBUG_EVENTS.TARGET_CONTINUED then
+					vim.schedule(function()
+						self.stack_frame_indicator:remove()
+					end)
 				end
 			end
 		end)
@@ -357,6 +361,10 @@ end
 
 function session:get_breakpoint(bp_id, callback)
 	self:write_command(RDBG_COMMANDS.GET_BREAKPOINT, { bp_id = bp_id }, callback)
+end
+
+function session:continue_execution()
+	self:write_command(RDBG_COMMANDS.CONTINUE_EXECUTION, {})
 end
 
 function session:on_buffer_loaded(buffer)
