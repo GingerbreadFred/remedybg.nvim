@@ -284,6 +284,7 @@ function session:loop()
 		for _, v in pairs(self.breakpoints:get_breakpoints()) do
 			self:write_command(RDBG_COMMANDS.ADD_BREAKPOINT_AT_FILENAME_LINE, { filename = v.file, line_num = v.line })
 		end
+		self:write_command(RDBG_COMMANDS.START_DEBUGGING, { break_at_entry_point = true })
 		self.state = state.CONNECTED
 	elseif self.state == state.CONNECTED then
 		assert(self.event_pipe, "Event pipe shouldn't be nil")
@@ -332,7 +333,11 @@ function session:loop()
 					vim.schedule(function()
 						self.breakpoints:on_breakpoint_removed_remotely(bp_id)
 					end)
-				elseif cmd == RDBG_DEBUG_EVENTS.EXIT_PROCESS or cmd == RDBG_DEBUG_EVENTS.TARGET_CONTINUED then
+				elseif cmd == RDBG_DEBUG_EVENTS.EXIT_PROCESS then
+					vim.schedule(function()
+						self.process:kill()
+					end)
+				elseif cmd == RDBG_DEBUG_EVENTS.TARGET_CONTINUED then
 					vim.schedule(function()
 						self.stack_frame_indicator:remove()
 					end)
@@ -340,11 +345,6 @@ function session:loop()
 			end
 		end)
 	end
-end
-
---- @param break_at_entry_point boolean
-function session:start_debugging(break_at_entry_point)
-	self:write_command(RDBG_COMMANDS.START_DEBUGGING, { break_at_entry_point = break_at_entry_point })
 end
 
 function session:step_into()

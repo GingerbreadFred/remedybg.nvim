@@ -4,13 +4,19 @@ local remedybg = {
 }
 
 local M = {}
+--- @class opts
+local opts = {
+	get_debugger_targets = nil,
+}
 
 --- @type session
 local active_session = nil
 --- @type breakpoints
 local breakpoints = remedybg.breakpoints:new()
 
-function M.setup()
+function M.setup(in_opts)
+	--- TODO: Better option handling
+	opts = in_opts or opts
 	remedybg.breakpoints.setup()
 	remedybg.session.setup()
 end
@@ -18,11 +24,6 @@ end
 --- @param executable_command string
 function M.setup_debugger(executable_command)
 	active_session = remedybg.session:new(executable_command, breakpoints)
-end
-
----@param break_at_entry_point boolean
-function M.start_debugging(break_at_entry_point)
-	active_session:start_debugging(break_at_entry_point)
 end
 
 function M.step_into()
@@ -46,7 +47,19 @@ function M.toggle_breakpoint()
 end
 
 function M.continue_execution()
-	active_session:continue_execution()
+	if not active_session then
+		if opts.get_debugger_targets and opts.get_debugger_targets() then
+			opts.get_debugger_targets()(function(cmd)
+				M.setup_debugger(cmd)
+			end)
+		else
+			local prompt = "Target: "
+			local target = vim.fn.input(prompt)
+			M.setup_debugger(target)
+		end
+	else
+		active_session:continue_execution()
+	end
 end
 
 function M.populate_signs(buffer)
