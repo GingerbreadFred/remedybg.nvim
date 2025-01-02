@@ -9,7 +9,7 @@ local opts = {
 	get_debugger_targets = nil,
 }
 
---- @type session
+--- @type session?
 local active_session = nil
 --- @type breakpoints
 local breakpoints = remedybg.breakpoints:new()
@@ -27,15 +27,21 @@ function M.setup_debugger(executable_command)
 end
 
 function M.step_into()
-	active_session:step_into()
+	if active_session then
+		active_session:step_into()
+	end
 end
 
 function M.step_over()
-	active_session:step_over()
+	if active_session then
+		active_session:step_over()
+	end
 end
 
 function M.step_out()
-	active_session:step_out()
+	if active_session then
+		active_session:step_out()
+	end
 end
 
 function M.toggle_breakpoint()
@@ -47,6 +53,11 @@ function M.toggle_breakpoint()
 end
 
 function M.continue_execution()
+	if active_session and not active_session:is_active() then
+		active_session:cleanup()
+		active_session = nil
+	end
+
 	if not active_session then
 		if opts.get_debugger_targets and opts.get_debugger_targets() then
 			opts.get_debugger_targets()(function(cmd)

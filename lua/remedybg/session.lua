@@ -28,6 +28,8 @@ local stack_frame_indicator = {
 	line_num = 0,
 	--- @type breakpoints
 	breakpoints = nil,
+	on_breakpoint_added = nil,
+	on_breakpoint_removed = nil,
 }
 
 function stack_frame_indicator:new(breakpoints)
@@ -36,18 +38,23 @@ function stack_frame_indicator:new(breakpoints)
 	self.__index = self
 
 	o.breakpoints = breakpoints
-	o.breakpoints:on_breakpoint_added(function(breakpoint)
+	o.on_breakpoint_added = function(breakpoint)
 		if o.filename == breakpoint.file and o.line_num == breakpoint.line then
 			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
 			o:place(buffer, true)
 		end
-	end)
-	o.breakpoints:on_breakpoint_removed(function(breakpoint)
-		if o.filename == breakpoint.file then
+	end
+
+	o.breakpoints:on_breakpoint_added(o.on_breakpoint_added)
+
+	o.on_breakpoint_removed = function(breakpoint)
+		if o.filename == breakpoint.file and o.line_num == breakpoint.line then
 			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
 			o:place(buffer, false)
 		end
-	end)
+	end
+
+	o.breakpoints:on_breakpoint_removed(o.on_breakpoint_removed)
 
 	return o
 end
@@ -94,6 +101,12 @@ function stack_frame_indicator:on_buffer_loaded(buffer)
 	end
 end
 
+function stack_frame_indicator:cleanup()
+	self:remove()
+	self.breakpoints:remove_on_breakpoint_added(self.on_breakpoint_added)
+	self.breakpoints:remove_on_breakpoint_removed(self.on_breakpoint_removed)
+end
+
 --- @class event_queue
 local event_queue = {
 	--- @type function[]
@@ -137,6 +150,8 @@ function event_queue:enqueue(func)
 	end
 end
 
+local poll_rate = 10
+
 --- @class session
 local session = {
 	--- @type uv_pipe_t?
@@ -155,6 +170,8 @@ local session = {
 	event_queue = nil,
 	--- @type stack_frame_indicator
 	stack_frame_indicator = nil,
+	on_breakpoint_added = nil,
+	on_breakpoint_removed = nil,
 }
 
 function session.setup()
@@ -172,14 +189,13 @@ function session:new(executable_command, breakpoints)
 	o.process = uv.spawn("remedybg.exe", { args = { "--servername test", executable_command }, verbatim = true })
 
 	o.timer = uv.new_timer()
-	o.timer:start(1000, 1000, function()
+	o.timer:start(poll_rate, poll_rate, function()
 		o:loop()
 	end)
 
 	o.breakpoints = breakpoints
 
-	-- TODO: handle session destruction and unregister callback
-	o.breakpoints:on_breakpoint_added(function(breakpoint, added_remotely)
+	o.on_breakpoint_added = function(breakpoint, added_remotely)
 		--- if the breakpoint was added locally then notify remedy_bg
 		if not added_remotely then
 			o:write_command(
@@ -187,13 +203,16 @@ function session:new(executable_command, breakpoints)
 				{ filename = breakpoint.file, line_num = breakpoint.line }
 			)
 		end
-	end)
+	end
 
-	o.breakpoints:on_breakpoint_removed(function(breakpoint, removed_remotely)
+	o.on_breakpoint_removed = function(breakpoint, removed_remotely)
 		if not removed_remotely then
 			o:write_command(RDBG_COMMANDS.DELETE_BREAKPOINT, { bp_id = breakpoint.remedybg_id })
 		end
-	end)
+	end
+
+	o.breakpoints:on_breakpoint_added(o.on_breakpoint_added)
+	o.breakpoints:on_breakpoint_removed(o.on_breakpoint_removed)
 
 	o.event_queue = event_queue:new()
 
@@ -202,25 +221,31 @@ function session:new(executable_command, breakpoints)
 	return o
 end
 
+function session:is_active()
+	return self.process and self.process:is_active()
+end
+
 function session:try_connect()
-	if not (self.current_session and self.current_session:is_active()) then
+	if not (self.current_session and self.current_session:is_writable()) then
 		self.current_session = uv.new_pipe()
 		self.current_session:connect(RDBG_PREFIX, function(err)
 			if err then
 				self.current_session:close()
+				self.current_session = nil
 			end
 		end)
 	end
-	if not (self.event_pipe and self.event_pipe:is_active()) then
+	if not (self.event_pipe and self.event_pipe:is_readable()) then
 		self.event_pipe = uv.new_pipe()
 		self.event_pipe:connect(RDBG_EVENTS, function(err)
 			if err then
 				self.event_pipe:close()
+				self.event_pipe = nil
 			end
 		end)
 	end
 
-	return self.current_session:is_active() and self.event_pipe:is_active()
+	return self.current_session:is_writable() and self.event_pipe:is_readable()
 end
 
 ---@param cmd RDBG_COMMANDS
@@ -265,12 +290,16 @@ function session:cleanup()
 		self.event_pipe:close()
 	end
 
-	self.breakpoints:on_debugger_terminated()
-	self.stack_frame_indicator:remove()
+	vim.schedule(function()
+		self.breakpoints:on_debugger_terminated()
+		self.breakpoints:remove_on_breakpoint_added(self.on_breakpoint_added)
+		self.breakpoints:remove_on_breakpoint_removed(self.on_breakpoint_removed)
+		self.stack_frame_indicator:cleanup()
+	end)
 end
 
 function session:loop()
-	if self.process and not self.process:is_active() then
+	if not self:is_active() then
 		self:cleanup()
 		return
 	end
@@ -287,7 +316,7 @@ function session:loop()
 		self:write_command(RDBG_COMMANDS.START_DEBUGGING, { break_at_entry_point = true })
 		self.state = state.CONNECTED
 	elseif self.state == state.CONNECTED then
-		assert(self.event_pipe, "Event pipe shouldn't be nil")
+		assert(self.event_pipe, "Event Pipe should not be nil, init has failed")
 
 		self.event_queue:run()
 		self.event_pipe:read_start(function(_, data)
