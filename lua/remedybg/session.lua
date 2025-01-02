@@ -47,14 +47,14 @@ function stack_frame_indicator:new(breakpoints)
 
 	o.breakpoints:on_breakpoint_added(o.on_breakpoint_added)
 
-	o.on_breakppont_removed = function(breakpoint)
-		if o.filename == breakpoint.file then
+	o.on_breakpoint_removed = function(breakpoint)
+		if o.filename == breakpoint.file and o.line_num == breakpoint.line then
 			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
 			o:place(buffer, false)
 		end
 	end
 
-	o.breakpoints:on_breakpoint_removed(o.on_breakppont_removed)
+	o.breakpoints:on_breakpoint_removed(o.on_breakpoint_removed)
 
 	return o
 end
@@ -287,10 +287,12 @@ function session:cleanup()
 		self.event_pipe:close()
 	end
 
-	self.breakpoints:on_debugger_terminated()
-	self.breakpoints:remove_on_breakpoint_added(self.on_breakpoint_added)
-	self.breakpoints:remove_on_breakpoint_removed(self.on_breakpoint_removed)
-	self.stack_frame_indicator:cleanup()
+	vim.schedule(function()
+		self.breakpoints:on_debugger_terminated()
+		self.breakpoints:remove_on_breakpoint_added(self.on_breakpoint_added)
+		self.breakpoints:remove_on_breakpoint_removed(self.on_breakpoint_removed)
+		self.stack_frame_indicator:cleanup()
+	end)
 end
 
 function session:loop()
