@@ -150,6 +150,8 @@ function event_queue:enqueue(func)
 	end
 end
 
+local poll_rate = 10
+
 --- @class session
 local session = {
 	--- @type uv_pipe_t?
@@ -187,7 +189,7 @@ function session:new(executable_command, breakpoints)
 	o.process = uv.spawn("remedybg.exe", { args = { "--servername test", executable_command }, verbatim = true })
 
 	o.timer = uv.new_timer()
-	o.timer:start(1000, 1000, function()
+	o.timer:start(poll_rate, poll_rate, function()
 		o:loop()
 	end)
 
@@ -209,7 +211,6 @@ function session:new(executable_command, breakpoints)
 		end
 	end
 
-	-- TODO: handle session destruction and unregister callback
 	o.breakpoints:on_breakpoint_added(o.on_breakpoint_added)
 	o.breakpoints:on_breakpoint_removed(o.on_breakpoint_removed)
 
@@ -225,24 +226,26 @@ function session:is_active()
 end
 
 function session:try_connect()
-	if not (self.current_session and self.current_session:is_active()) then
+	if not (self.current_session and self.current_session:is_writable()) then
 		self.current_session = uv.new_pipe()
 		self.current_session:connect(RDBG_PREFIX, function(err)
 			if err then
 				self.current_session:close()
+				self.current_session = nil
 			end
 		end)
 	end
-	if not (self.event_pipe and self.event_pipe:is_active()) then
+	if not (self.event_pipe and self.event_pipe:is_readable()) then
 		self.event_pipe = uv.new_pipe()
 		self.event_pipe:connect(RDBG_EVENTS, function(err)
 			if err then
 				self.event_pipe:close()
+				self.event_pipe = nil
 			end
 		end)
 	end
 
-	return self.current_session:is_active() and self.event_pipe:is_active()
+	return self.current_session:is_writable() and self.event_pipe:is_readable()
 end
 
 ---@param cmd RDBG_COMMANDS
@@ -313,7 +316,7 @@ function session:loop()
 		self:write_command(RDBG_COMMANDS.START_DEBUGGING, { break_at_entry_point = true })
 		self.state = state.CONNECTED
 	elseif self.state == state.CONNECTED then
-		assert(self.event_pipe, "Event pipe shouldn't be nil")
+		assert(self.event_pipe, "Event Pipe should not be nil, init has failed")
 
 		self.event_queue:run()
 		self.event_pipe:read_start(function(_, data)
