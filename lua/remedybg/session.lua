@@ -28,6 +28,8 @@ local stack_frame_indicator = {
 	line_num = 0,
 	--- @type breakpoints
 	breakpoints = nil,
+	on_breakpoint_added = nil,
+	on_breakpoint_removed = nil,
 }
 
 function stack_frame_indicator:new(breakpoints)
@@ -36,18 +38,23 @@ function stack_frame_indicator:new(breakpoints)
 	self.__index = self
 
 	o.breakpoints = breakpoints
-	o.breakpoints:on_breakpoint_added(function(breakpoint)
+	o.on_breakpoint_added = function(breakpoint)
 		if o.filename == breakpoint.file and o.line_num == breakpoint.line then
 			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
 			o:place(buffer, true)
 		end
-	end)
-	o.breakpoints:on_breakpoint_removed(function(breakpoint)
+	end
+
+	o.breakpoints:on_breakpoint_added(o.on_breakpoint_added)
+
+	o.on_breakppont_removed = function(breakpoint)
 		if o.filename == breakpoint.file then
 			local buffer = remedybg.util.get_buffer_for_filename(o.filename)
 			o:place(buffer, false)
 		end
-	end)
+	end
+
+	o.breakpoints:on_breakpoint_removed(o.on_breakppont_removed)
 
 	return o
 end
@@ -92,6 +99,12 @@ function stack_frame_indicator:on_buffer_loaded(buffer)
 	if filename == self.filename then
 		self:place(buffer)
 	end
+end
+
+function stack_frame_indicator:cleanup()
+	self:remove()
+	self.breakpoints:remove_on_breakpoint_added(self.on_breakpoint_added)
+	self.breakpoints:remove_on_breakpoint_removed(self.on_breakpoint_removed)
 end
 
 --- @class event_queue
@@ -155,6 +168,8 @@ local session = {
 	event_queue = nil,
 	--- @type stack_frame_indicator
 	stack_frame_indicator = nil,
+	on_breakpoint_added = nil,
+	on_breakpoint_removed = nil,
 }
 
 function session.setup()
@@ -178,8 +193,7 @@ function session:new(executable_command, breakpoints)
 
 	o.breakpoints = breakpoints
 
-	-- TODO: handle session destruction and unregister callback
-	o.breakpoints:on_breakpoint_added(function(breakpoint, added_remotely)
+	o.on_breakpoint_added = function(breakpoint, added_remotely)
 		--- if the breakpoint was added locally then notify remedy_bg
 		if not added_remotely then
 			o:write_command(
@@ -187,19 +201,27 @@ function session:new(executable_command, breakpoints)
 				{ filename = breakpoint.file, line_num = breakpoint.line }
 			)
 		end
-	end)
+	end
 
-	o.breakpoints:on_breakpoint_removed(function(breakpoint, removed_remotely)
+	o.on_breakpoint_removed = function(breakpoint, removed_remotely)
 		if not removed_remotely then
 			o:write_command(RDBG_COMMANDS.DELETE_BREAKPOINT, { bp_id = breakpoint.remedybg_id })
 		end
-	end)
+	end
+
+	-- TODO: handle session destruction and unregister callback
+	o.breakpoints:on_breakpoint_added(o.on_breakpoint_added)
+	o.breakpoints:on_breakpoint_removed(o.on_breakpoint_removed)
 
 	o.event_queue = event_queue:new()
 
 	o.stack_frame_indicator = stack_frame_indicator:new(breakpoints)
 
 	return o
+end
+
+function session:is_active()
+	return self.process and self.process:is_active()
 end
 
 function session:try_connect()
@@ -266,11 +288,13 @@ function session:cleanup()
 	end
 
 	self.breakpoints:on_debugger_terminated()
-	self.stack_frame_indicator:remove()
+	self.breakpoints:remove_on_breakpoint_added(self.on_breakpoint_added)
+	self.breakpoints:remove_on_breakpoint_removed(self.on_breakpoint_removed)
+	self.stack_frame_indicator:cleanup()
 end
 
 function session:loop()
-	if self.process and not self.process:is_active() then
+	if not self:is_active() then
 		self:cleanup()
 		return
 	end

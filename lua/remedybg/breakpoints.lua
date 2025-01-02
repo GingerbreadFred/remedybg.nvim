@@ -98,9 +98,27 @@ function breakpoints:on_breakpoint_added(callback)
 	table.insert(self.breakpoint_added, callback)
 end
 
+--- @param callback fun(breakpoint : breakpoint, added_remotely : boolean)
+function breakpoints:remove_on_breakpoint_added(callback)
+	for k, v in pairs(self.breakpoint_added) do
+		if v == callback then
+			table.remove(self.breakpoint_added, k)
+		end
+	end
+end
+
 --- @param callback fun(breakpoint : breakpoint, removed_remotely : boolean)
 function breakpoints:on_breakpoint_removed(callback)
 	table.insert(self.breakpoint_removed, callback)
+end
+
+--- @param callback fun(breakpoint : breakpoint, removed_remotely : boolean)
+function breakpoints:remove_on_breakpoint_removed(callback)
+	for k, v in pairs(self.breakpoint_removed) do
+		if v == callback then
+			table.remove(self.breakpoint_removed, k)
+		end
+	end
 end
 
 ---@return breakpoint[]
